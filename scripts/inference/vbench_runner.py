@@ -5,13 +5,13 @@ import argparse
 import csv
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 ALLOWED_TYPES = ['indoor', 'scenery']
@@ -124,8 +124,12 @@ def main():
 
         existing_mp4s = sorted(out_sub.glob('*.mp4'))
 
+        # generate NUM_SAMPLES distinct random seeds, reproducible per (base_seed, prompt)
+        rng = random.Random(args.base_seed ^ hash(p['caption']))
+        seeds = [rng.randint(0, 2**31 - 1) for _ in range(NUM_SAMPLES)]
+
         for si in range(NUM_SAMPLES):
-            seed = args.base_seed + si
+            seed = seeds[si]
 
             if si < len(existing_mp4s):
                 skipped += 1; done += 1
@@ -151,60 +155,67 @@ def main():
             vram_thread = threading.Thread(target=_poll_vram, args=(stop_evt, vram_readings), daemon=True)
             vram_thread.start()
 
-            t0 = datetime.now(timezone.utc)
-            env = {**os.environ,
-                   'TOKENIZERS_PARALLELISM': 'false',
-                   'TF_ENABLE_ONEDNN_OPTS':  '0',
-                   'LOCAL_RANK': '0', 'RANK': '0', 'WORLD_SIZE': '1',
-                   'MASTER_ADDR': '127.0.0.1', 'MASTER_PORT': '29500'}
-            subprocess.run([
-                sys.executable, 'fastvideo/sample/sample_5b.py',
-                '--seed', str(seed),
-                '--gradient_checkpointing',
-                '--train_batch_size=1',
-                '--max_sample_steps=1',
-                '--mixed_precision=bf16',
-                '--allow_tf32',
-                '--t5_cpu',
-                f'--video_output_dir={out_sub}',
-                f'--jpg_dir={tmp_dir}',
-                f'--caption_path={cap_file}',
-                '--test_data_dir=./val',
-                '--num_euler_timesteps', '5',
-                '--rand_num_img', '0.6',
-                '--internvl_path', './InternVL3-2B-Instruct',
-                '--height', '384',
-                '--width', '512',
-                '--num_frames', str(NUM_FRAMES),
-                '--fps', '24',
-            ], cwd=str(work_dir), env=env)
+            t0 = time.time()
+            vram = ram = dur = fps = ''
+            out_path = ''
+            status = 'error'
+            try:
+                env = {**os.environ,
+                       'TOKENIZERS_PARALLELISM': 'false',
+                       'TF_ENABLE_ONEDNN_OPTS':  '0',
+                       'LOCAL_RANK': '0', 'RANK': '0', 'WORLD_SIZE': '1',
+                       'MASTER_ADDR': '127.0.0.1', 'MASTER_PORT': '29500'}
+                subprocess.run([
+                    sys.executable, 'fastvideo/sample/sample_5b.py',
+                    '--seed', str(seed),
+                    '--gradient_checkpointing',
+                    '--train_batch_size=1',
+                    '--max_sample_steps=1',
+                    '--mixed_precision=bf16',
+                    '--allow_tf32',
+                    '--t5_cpu',
+                    f'--video_output_dir={out_sub}',
+                    f'--jpg_dir={tmp_dir}',
+                    f'--caption_path={cap_file}',
+                    '--test_data_dir=./val',
+                    '--num_euler_timesteps', '5',
+                    '--rand_num_img', '0.6',
+                    '--internvl_path', './InternVL3-2B-Instruct',
+                    '--height', '384',
+                    '--width', '512',
+                    '--num_frames', str(NUM_FRAMES),
+                    '--fps', '24',
+                ], cwd=str(work_dir), env=env)
 
-            stop_evt.set()
-            vram_thread.join(timeout=10)
+                dur  = round(time.time() - t0, 2)
+                fps  = round(NUM_FRAMES / dur, 2)
 
-            dur  = (datetime.now(timezone.utc) - t0).total_seconds()
-            fps  = round(NUM_FRAMES / dur, 2)
-            vram = _vram_peak_gb(vram_readings)
-            ram  = _ram_gb()
-
-            # detect actual output mp4
-            new_mp4s = [f for f in out_sub.glob('*.mp4')
-                        if f.stat().st_mtime >= t0.timestamp()]
-            new_mp4s.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-
-            if new_mp4s:
-                out_path = str(new_mp4s[0])
-                print(f'  done in {dur:.1f}s  ({fps} gen-fps)  VRAM {vram}GB  RAM {ram}GB')
+                # detect actual output mp4
+                new_mp4s = sorted(
+                    [f for f in out_sub.glob('*.mp4') if f.stat().st_mtime >= t0],
+                    key=lambda f: f.stat().st_mtime, reverse=True
+                )
+                if new_mp4s:
+                    out_path = str(new_mp4s[0])
+                    status = 'ok'
+            except Exception as exc:
+                print(f'  EXCEPTION: {exc}', file=sys.stderr)
+            finally:
+                stop_evt.set()
+                vram_thread.join(timeout=10)
+                vram = _vram_peak_gb(vram_readings)
+                ram  = _ram_gb()
                 writer.writerow([ti, p['caption'], p['type'], si, seed,
-                                  round(dur, 2), fps, vram, ram, out_path, 'ok'])
+                                  dur, fps, vram, ram, out_path, status])
+                stats_f.flush()
+
+            if status == 'ok':
+                print(f'  done in {dur}s  ({fps} gen-fps)  VRAM {vram}GB  RAM {ram}GB')
                 generated += 1
             else:
                 print(f'  ERROR - no mp4 found')
-                writer.writerow([ti, p['caption'], p['type'], si, seed,
-                                  '', '', vram, ram, '', 'error'])
                 errors += 1
 
-            stats_f.flush()
             done += 1
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
