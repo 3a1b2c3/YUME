@@ -1,7 +1,6 @@
 """
 vbench_runner.py  --  Python replacement for vbench_runner.ps1
-Calls sample_5b.py once per prompt with NUM_SAMPLES caption lines,
-so the model loads once per prompt instead of once per sample.
+Calls sample_5b.py once per sample with a fresh random seed each time.
 """
 import argparse
 import csv
@@ -57,16 +56,14 @@ def _vram_peak_gb(readings):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--base-seed',   required=False, type=int, default=None)
     ap.add_argument('--vbench-json', required=True)
     ap.add_argument('--vbench-crop', required=True)
     ap.add_argument('--work-dir',    required=True)
     args = ap.parse_args()
 
     work_dir   = Path(args.work_dir)
-    run_seed   = args.base_seed if args.base_seed is not None else random.randint(0, 2**31 - 1)
-    out_base   = work_dir / 'outputs' / 'vbench' / f'seed{run_seed}' / 'videos'
-    stats_path = work_dir / 'outputs' / 'vbench' / f'seed{run_seed}' / 'stats.csv'
+    out_base   = work_dir / 'outputs' / 'vbench' / 'videos'
+    stats_path = work_dir / 'outputs' / 'vbench' / 'stats.csv'
 
     if not Path(args.vbench_json).exists():
         sys.exit(f'[vbench] ERROR: JSON not found: {args.vbench_json}')
@@ -88,8 +85,7 @@ def main():
         prompts.append({'file': fn, 'caption': cap, 'type': e['type']})
 
     total = len(prompts) * NUM_SAMPLES
-    print(f'\n=== VBench  run_seed={run_seed}  out={out_base} ===')
-    print(f'=== VBench prompt list ({len(prompts)} prompts, types: {", ".join(ALLOWED_TYPES)}) ===')
+    print(f'\n=== VBench prompt list ({len(prompts)} prompts, types: {", ".join(ALLOWED_TYPES)}) ===')
     for i, p in enumerate(prompts):
         img_ok = '  ' if (Path(args.vbench_crop) / p['file']).exists() else 'MISSING'
         print(f'  [{i+1:2}/{len(prompts)}] ({p["type"]:<8}) {img_ok} {p["caption"]}')
@@ -118,17 +114,30 @@ def main():
 
         safe_cap = _safe(p['caption'])
 
-        # check how many samples already completed (renamed with _s{i}_seed suffix)
+        # samples already completed (renamed with _s{i}_seed{n} suffix)
         already = sorted(out_base.glob(f'*{safe_cap}*_s[0-9]*_seed*.mp4'))
         n_already = len(already)
 
-        # also check for un-renamed files left by an interrupted run
+        # orphans: files from an interrupted run that were never renamed
         orphans = sorted([f for f in out_base.glob(f'*{safe_cap}*.mp4')
                           if '_seed' not in f.name])
 
-        n_needed = NUM_SAMPLES - n_already - len(orphans)
+        # recover orphans with new random seeds
+        for i, src in enumerate(orphans):
+            si_abs = n_already + i
+            seed   = random.randint(0, 2**31 - 1)
+            dst    = src.with_stem(f'{src.stem}_s{si_abs}_seed{seed}')
+            print(f'  [recover] {src.name} -> {dst.name}')
+            src.rename(dst)
+            writer.writerow([ti, p['caption'], p['type'], si_abs, seed,
+                              '', '', '', '', str(dst), 'recovered'])
+            stats_f.flush()
+            already.append(dst)
+        n_already = len(already)
 
-        if n_needed <= 0 and not orphans:
+        n_needed = NUM_SAMPLES - n_already
+
+        if n_needed <= 0:
             print(f'[vbench] skip prompt {ti+1}: all {NUM_SAMPLES} samples already done')
             for i, f in enumerate(already):
                 writer.writerow([ti, p['caption'], p['type'], i, '', '', '', '', '', str(f), 'skipped'])
@@ -137,144 +146,117 @@ def main():
             done    += NUM_SAMPLES
             continue
 
-        if n_already > 0 or orphans:
-            print(f'[vbench] prompt {ti+1}: {n_already} renamed + {len(orphans)} unfinished, resuming {max(0,n_needed)} new')
+        if n_already > 0:
+            print(f'[vbench] prompt {ti+1}: {n_already} done, running {n_needed} remaining')
 
-        # seed for this prompt (derived from run_seed for reproducibility)
-        rng  = random.Random(run_seed ^ hash(p['caption']))
-        seed = rng.randint(0, 2**31 - 1)
-
-        # recover any orphan files left by a previous interrupted run
-        for i, src in enumerate(orphans):
-            si_abs = n_already + i
-            dst = src.with_stem(f'{src.stem}_s{si_abs}_seed{seed}')
-            print(f'  [recover] {src.name} -> {dst.name}')
-            src.rename(dst)
-            writer.writerow([ti, p['caption'], p['type'], si_abs, seed,
-                              '', '', '', '', str(dst), 'recovered'])
-            stats_f.flush()
-            already.append(dst)
-        n_already = len(already)
-        n_needed  = max(0, NUM_SAMPLES - n_already)
-
-        if n_needed <= 0:
-            print(f'[vbench] skip prompt {ti+1}: all {NUM_SAMPLES} samples recovered/done')
-            skipped += NUM_SAMPLES
-            done    += NUM_SAMPLES
-            continue
-
-        pct = round(100 * done / total) if total else 0
-        eta = ''
-        if done > 0:
-            elapsed = time.time() - t_start
-            rem = int(elapsed / done * (total - done))
-            eta = f' ETA {rem//3600}:{(rem%3600)//60:02d}:{rem%60:02d}'
         short_cap = p['caption'][:60]
-        print(f'[vbench] [{done+1}/{total} {pct}%{eta}]  '
-              f'prompt {ti+1}/{len(prompts)} ({p["type"]})  '
-              f'{n_needed} samples  seed {seed} : {short_cap}')
 
-        # prepare temp dir with exactly this image
+        # prepare temp dir with this image (shared across all samples for this prompt)
         tmp_dir = work_dir / '_vbench_tmp'
         tmp_dir.mkdir(exist_ok=True)
         for f in tmp_dir.iterdir():
             f.unlink(missing_ok=True)
         shutil.copy(img_src, tmp_dir)
 
-        # write n_needed identical caption lines so sample_5b generates n_needed videos
         cap_file = work_dir / '_vbench_caption.txt'
-        cap_file.write_text('\n'.join([p['caption']] * n_needed), encoding='utf-8')
 
-        # start VRAM polling
-        vram_readings = []
-        stop_evt  = threading.Event()
-        vram_thread = threading.Thread(target=_poll_vram, args=(stop_evt, vram_readings), daemon=True)
-        vram_thread.start()
+        for si in range(n_needed):
+            si_abs = n_already + si
+            seed   = random.randint(0, 2**31 - 1)
 
-        t0     = time.time()
-        status = 'error'
-        new_mp4s = []
-        try:
-            # snapshot existing files so we can find new ones after subprocess
-            pre_existing = set(out_base.glob('*.mp4'))
+            pct = round(100 * done / total) if total else 0
+            eta = ''
+            if done > 0:
+                elapsed = time.time() - t_start
+                rem = int(elapsed / done * (total - done))
+                eta = f' ETA {rem//3600}:{(rem%3600)//60:02d}:{rem%60:02d}'
+            print(f'[vbench] [{done+1}/{total} {pct}%{eta}]  '
+                  f'prompt {ti+1}/{len(prompts)} sample {si_abs+1}/{NUM_SAMPLES}  '
+                  f'seed {seed} : {short_cap}')
 
-            env = {**os.environ,
-                   'TOKENIZERS_PARALLELISM': 'false',
-                   'TF_ENABLE_ONEDNN_OPTS':  '0',
-                   'LOCAL_RANK': '0', 'RANK': '0', 'WORLD_SIZE': '1',
-                   'MASTER_ADDR': '127.0.0.1', 'MASTER_PORT': '29500'}
-            subprocess.run([
-                sys.executable, 'fastvideo/sample/sample_5b.py',
-                '--seed', str(seed),
-                '--gradient_checkpointing',
-                '--train_batch_size=1',
-                '--max_sample_steps=1',
-                '--mixed_precision=bf16',
-                '--allow_tf32',
-                '--t5_cpu',
-                f'--video_output_dir={out_base}',
-                f'--jpg_dir={tmp_dir}',
-                f'--caption_path={cap_file}',
-                '--test_data_dir=./val',
-                '--num_euler_timesteps', '5',
-                '--rand_num_img', '0.6',
-                '--internvl_path', './InternVL3-2B-Instruct',
-                '--height', '384',
-                '--width', '512',
-                '--num_frames', str(NUM_FRAMES),
-                '--fps', '24',
-            ], cwd=str(work_dir), env=env)
+            cap_file.write_text(p['caption'], encoding='utf-8')
 
-            dur = round(time.time() - t0, 2)
-            fps = round(NUM_FRAMES * n_needed / dur, 2)
+            vram_readings = []
+            stop_evt    = threading.Event()
+            vram_thread = threading.Thread(target=_poll_vram, args=(stop_evt, vram_readings), daemon=True)
+            vram_thread.start()
 
-            # collect new output files via set-difference (avoids mtime issues)
-            all_now  = set(out_base.glob('*.mp4'))
-            raw_mp4s = sorted(
-                [f for f in (all_now - pre_existing)
-                 if safe_cap in f.name and '_seed' not in f.name],
-                key=lambda f: f.name   # sort by name → _0, _1, _2 ... order
-            )
-            print(f'  [detect] {len(raw_mp4s)} new mp4s found (pre={len(pre_existing)}, now={len(all_now)})')
+            t0     = time.time()
+            status = 'error'
+            new_mp4 = None
+            try:
+                pre_existing = set(out_base.glob('*.mp4'))
 
-            for i, src in enumerate(raw_mp4s):
-                si_abs = n_already + i
-                dst = src.with_stem(f'{src.stem}_s{si_abs}_seed{seed}')
-                src.rename(dst)
-                new_mp4s.append(dst)
+                env = {**os.environ,
+                       'TOKENIZERS_PARALLELISM': 'false',
+                       'TF_ENABLE_ONEDNN_OPTS':  '0',
+                       'LOCAL_RANK': '0', 'RANK': '0', 'WORLD_SIZE': '1',
+                       'MASTER_ADDR': '127.0.0.1', 'MASTER_PORT': '29500'}
+                subprocess.run([
+                    sys.executable, 'fastvideo/sample/sample_5b.py',
+                    '--seed', str(seed),
+                    '--gradient_checkpointing',
+                    '--train_batch_size=1',
+                    '--max_sample_steps=1',
+                    '--mixed_precision=bf16',
+                    '--allow_tf32',
+                    '--t5_cpu',
+                    f'--video_output_dir={out_base}',
+                    f'--jpg_dir={tmp_dir}',
+                    f'--caption_path={cap_file}',
+                    '--test_data_dir=./val',
+                    '--num_euler_timesteps', '5',
+                    '--rand_num_img', '0.6',
+                    '--internvl_path', './InternVL3-2B-Instruct',
+                    '--height', '384',
+                    '--width', '512',
+                    '--num_frames', str(NUM_FRAMES),
+                    '--fps', '24',
+                ], cwd=str(work_dir), env=env)
 
-            if len(new_mp4s) == n_needed:
-                status = 'ok'
+                dur = round(time.time() - t0, 2)
+                fps = round(NUM_FRAMES / dur, 2)
+
+                all_now  = set(out_base.glob('*.mp4'))
+                raw_mp4s = sorted(
+                    [f for f in (all_now - pre_existing)
+                     if safe_cap in f.name and '_seed' not in f.name],
+                    key=lambda f: f.name
+                )
+                print(f'  [detect] {len(raw_mp4s)} new mp4s (pre={len(pre_existing)}, now={len(all_now)})')
+
+                if raw_mp4s:
+                    src = raw_mp4s[0]
+                    dst = src.with_stem(f'{src.stem}_s{si_abs}_seed{seed}')
+                    src.rename(dst)
+                    new_mp4 = dst
+                    status  = 'ok'
+                    if len(raw_mp4s) > 1:
+                        print(f'  WARNING: expected 1 mp4, got {len(raw_mp4s)} — using first')
+                else:
+                    print(f'  WARNING: no new mp4 found for sample {si_abs}')
+
+            except Exception as exc:
+                print(f'  EXCEPTION: {exc}', file=sys.stderr)
+            finally:
+                stop_evt.set()
+                vram_thread.join(timeout=10)
+                vram = _vram_peak_gb(vram_readings)
+                ram  = _ram_gb()
+
+            if status == 'ok':
+                print(f'  done in {dur}s  ({fps} gen-fps)  VRAM {vram}GB  RAM {ram}GB')
+                writer.writerow([ti, p['caption'], p['type'], si_abs, seed,
+                                  dur, fps, vram, ram, str(new_mp4), 'ok'])
+                stats_f.flush()
+                generated += 1
+                done      += 1
             else:
-                print(f'  WARNING: expected {n_needed} mp4s, got {len(new_mp4s)}')
-
-        except Exception as exc:
-            print(f'  EXCEPTION: {exc}', file=sys.stderr)
-        finally:
-            stop_evt.set()
-            vram_thread.join(timeout=10)
-            vram = _vram_peak_gb(vram_readings)
-            ram  = _ram_gb()
-
-        if status == 'ok':
-            print(f'  done in {dur}s  ({fps} gen-fps)  VRAM {vram}GB  RAM {ram}GB')
-        for i, mp4 in enumerate(new_mp4s):
-            si_abs   = n_already + i
-            row_stat = 'ok' if status == 'ok' else 'partial'
-            writer.writerow([ti, p['caption'], p['type'], si_abs, seed,
-                              dur if i == 0 else '', fps if i == 0 else '',
-                              vram if i == 0 else '', ram if i == 0 else '',
-                              str(mp4), row_stat])
-            stats_f.flush()
-        if status == 'ok':
-            generated += len(new_mp4s)
-            done      += n_needed
-        else:
-            writer.writerow([ti, p['caption'], p['type'], '', seed,
-                              '', '', '', '', '', 'error'])
-            stats_f.flush()
-            stats_f.close()
-            sys.exit(f'[vbench] FATAL error on prompt {ti+1} "{short_cap}" - stopping')
+                writer.writerow([ti, p['caption'], p['type'], si_abs, seed,
+                                  '', '', '', '', '', 'error'])
+                stats_f.flush()
+                stats_f.close()
+                sys.exit(f'[vbench] FATAL error on prompt {ti+1} sample {si_abs} "{short_cap}" - stopping')
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
         cap_file.unlink(missing_ok=True)
