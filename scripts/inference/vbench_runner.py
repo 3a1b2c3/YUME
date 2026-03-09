@@ -64,8 +64,9 @@ def main():
     args = ap.parse_args()
 
     work_dir   = Path(args.work_dir)
-    out_base   = work_dir / 'outputs' / 'vbench' / 'videos'
-    stats_path = work_dir / 'outputs' / 'vbench' / 'stats.csv'
+    run_seed   = args.base_seed if args.base_seed is not None else random.randint(0, 2**31 - 1)
+    out_base   = work_dir / 'outputs' / 'vbench' / f'seed{run_seed}' / 'videos'
+    stats_path = work_dir / 'outputs' / 'vbench' / f'seed{run_seed}' / 'stats.csv'
 
     if not Path(args.vbench_json).exists():
         sys.exit(f'[vbench] ERROR: JSON not found: {args.vbench_json}')
@@ -87,7 +88,8 @@ def main():
         prompts.append({'file': fn, 'caption': cap, 'type': e['type']})
 
     total = len(prompts) * NUM_SAMPLES
-    print(f'\n=== VBench prompt list ({len(prompts)} prompts, types: {", ".join(ALLOWED_TYPES)}) ===')
+    print(f'\n=== VBench  run_seed={run_seed}  out={out_base} ===')
+    print(f'=== VBench prompt list ({len(prompts)} prompts, types: {", ".join(ALLOWED_TYPES)}) ===')
     for i, p in enumerate(prompts):
         img_ok = '  ' if (Path(args.vbench_crop) / p['file']).exists() else 'MISSING'
         print(f'  [{i+1:2}/{len(prompts)}] ({p["type"]:<8}) {img_ok} {p["caption"]}')
@@ -138,12 +140,9 @@ def main():
         if n_already > 0 or orphans:
             print(f'[vbench] prompt {ti+1}: {n_already} renamed + {len(orphans)} unfinished, resuming {max(0,n_needed)} new')
 
-        # seed for this prompt
-        if args.base_seed is not None:
-            rng  = random.Random(args.base_seed ^ hash(p['caption']))
-            seed = rng.randint(0, 2**31 - 1)
-        else:
-            seed = random.randint(0, 2**31 - 1)
+        # seed for this prompt (derived from run_seed for reproducibility)
+        rng  = random.Random(run_seed ^ hash(p['caption']))
+        seed = rng.randint(0, 2**31 - 1)
 
         # recover any orphan files left by a previous interrupted run
         for i, src in enumerate(orphans):
