@@ -57,7 +57,7 @@ def _vram_peak_gb(readings):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--base-seed',   required=True, type=int)
+    ap.add_argument('--base-seed',   required=False, type=int, default=None)
     ap.add_argument('--vbench-json', required=True)
     ap.add_argument('--vbench-crop', required=True)
     ap.add_argument('--work-dir',    required=True)
@@ -138,9 +138,12 @@ def main():
         if n_already > 0 or orphans:
             print(f'[vbench] prompt {ti+1}: {n_already} renamed + {len(orphans)} unfinished, resuming {max(0,n_needed)} new')
 
-        # seed for this prompt (reproducible)
-        rng  = random.Random(args.base_seed ^ hash(p['caption']))
-        seed = rng.randint(0, 2**31 - 1)
+        # seed for this prompt
+        if args.base_seed is not None:
+            rng  = random.Random(args.base_seed ^ hash(p['caption']))
+            seed = rng.randint(0, 2**31 - 1)
+        else:
+            seed = random.randint(0, 2**31 - 1)
 
         # recover any orphan files left by a previous interrupted run
         for i, src in enumerate(orphans):
