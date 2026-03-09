@@ -148,7 +148,7 @@ def main():
             short_cap = p['caption'][:60]
             print(f'[vbench] [{done+1}/{total} {pct}%{eta}]  '
                   f'prompt {ti+1}/{len(prompts)} ({p["type"]})  '
-                  f'sample {si+1}/{NUM_SAMPLES} : {short_cap}')
+                  f'sample {si+1}/{NUM_SAMPLES}  seed {seed} : {short_cap}')
 
             # start VRAM polling thread
             vram_readings = []
