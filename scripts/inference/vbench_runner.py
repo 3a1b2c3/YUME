@@ -119,9 +119,14 @@ def main():
         # check how many samples already completed (renamed with _s{i}_seed suffix)
         already = sorted(out_base.glob(f'*{safe_cap}*_s[0-9]*_seed*.mp4'))
         n_already = len(already)
-        n_needed  = NUM_SAMPLES - n_already
 
-        if n_needed <= 0:
+        # also check for un-renamed files left by an interrupted run
+        orphans = sorted([f for f in out_base.glob(f'*{safe_cap}*.mp4')
+                          if '_seed' not in f.name])
+
+        n_needed = NUM_SAMPLES - n_already - len(orphans)
+
+        if n_needed <= 0 and not orphans:
             print(f'[vbench] skip prompt {ti+1}: all {NUM_SAMPLES} samples already done')
             for i, f in enumerate(already):
                 writer.writerow([ti, p['caption'], p['type'], i, '', '', '', '', '', str(f), 'skipped'])
@@ -130,12 +135,31 @@ def main():
             done    += NUM_SAMPLES
             continue
 
-        if n_already > 0:
-            print(f'[vbench] prompt {ti+1}: {n_already} done, resuming {n_needed} remaining')
+        if n_already > 0 or orphans:
+            print(f'[vbench] prompt {ti+1}: {n_already} renamed + {len(orphans)} unfinished, resuming {max(0,n_needed)} new')
 
         # seed for this prompt (reproducible)
         rng  = random.Random(args.base_seed ^ hash(p['caption']))
         seed = rng.randint(0, 2**31 - 1)
+
+        # recover any orphan files left by a previous interrupted run
+        for i, src in enumerate(orphans):
+            si_abs = n_already + i
+            dst = src.with_stem(f'{src.stem}_s{si_abs}_seed{seed}')
+            print(f'  [recover] {src.name} -> {dst.name}')
+            src.rename(dst)
+            writer.writerow([ti, p['caption'], p['type'], si_abs, seed,
+                              '', '', '', '', str(dst), 'recovered'])
+            stats_f.flush()
+            already.append(dst)
+        n_already = len(already)
+        n_needed  = max(0, NUM_SAMPLES - n_already)
+
+        if n_needed <= 0:
+            print(f'[vbench] skip prompt {ti+1}: all {NUM_SAMPLES} samples recovered/done')
+            skipped += NUM_SAMPLES
+            done    += NUM_SAMPLES
+            continue
 
         pct = round(100 * done / total) if total else 0
         eta = ''
@@ -169,6 +193,9 @@ def main():
         status = 'error'
         new_mp4s = []
         try:
+            # snapshot existing files so we can find new ones after subprocess
+            pre_existing = set(out_base.glob('*.mp4'))
+
             env = {**os.environ,
                    'TOKENIZERS_PARALLELISM': 'false',
                    'TF_ENABLE_ONEDNN_OPTS':  '0',
@@ -199,13 +226,14 @@ def main():
             dur = round(time.time() - t0, 2)
             fps = round(NUM_FRAMES * n_needed / dur, 2)
 
-            # collect new output files by mtime and caption match
+            # collect new output files via set-difference (avoids mtime issues)
+            all_now  = set(out_base.glob('*.mp4'))
             raw_mp4s = sorted(
-                [f for f in out_base.glob('*.mp4')
-                 if safe_cap in f.name and f.stat().st_mtime >= t0 - 2
-                 and '_seed' not in f.name],
+                [f for f in (all_now - pre_existing)
+                 if safe_cap in f.name and '_seed' not in f.name],
                 key=lambda f: f.name   # sort by name → _0, _1, _2 ... order
             )
+            print(f'  [detect] {len(raw_mp4s)} new mp4s found (pre={len(pre_existing)}, now={len(all_now)})')
 
             for i, src in enumerate(raw_mp4s):
                 si_abs = n_already + i
