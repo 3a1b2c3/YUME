@@ -119,10 +119,11 @@ def main():
         cap_file = work_dir / '_vbench_caption.txt'
         cap_file.write_text(p['caption'], encoding='utf-8')
 
-        out_sub = out_base / _safe(p['caption'])
+        out_sub = out_base
         out_sub.mkdir(parents=True, exist_ok=True)
 
-        existing_mp4s = sorted(out_sub.glob('*.mp4'))
+        safe_cap = _safe(p['caption'])
+        existing_mp4s = sorted(f for f in out_sub.glob('*.mp4') if safe_cap in f.name)
 
         # generate NUM_SAMPLES distinct random seeds, reproducible per (base_seed, prompt)
         rng = random.Random(args.base_seed ^ hash(p['caption']))
@@ -190,9 +191,10 @@ def main():
                 dur  = round(time.time() - t0, 2)
                 fps  = round(NUM_FRAMES / dur, 2)
 
-                # detect actual output mp4
+                # detect actual output mp4 (match by prompt name + mtime)
                 new_mp4s = sorted(
-                    [f for f in out_sub.glob('*.mp4') if f.stat().st_mtime >= t0],
+                    [f for f in out_sub.glob('*.mp4')
+                     if safe_cap in f.name and f.stat().st_mtime >= t0],
                     key=lambda f: f.stat().st_mtime, reverse=True
                 )
                 if new_mp4s:
