@@ -9,89 +9,30 @@ set WORLD_SIZE=1
 set MASTER_ADDR=127.0.0.1
 set MASTER_PORT=29500
 
-set EXAMPLE_DIR=C:\workspace\world\Infinite-World\assets\example_case
+set VBENCH_JSON=C:\workspace\world\VBench\vbench2_beta_i2v\vbench2_beta_i2v\data\i2v-bench-info.json
+set VBENCH_CROP=C:\workspace\world\VBench\vbench2_beta_i2v\vbench2_beta_i2v\data\crop\1-1
+set PS_SCRIPT=%~dp0vbench_runner.ps1
 
 cd /d "%~dp0..\\.."
 
-for /f "tokens=*" %%T in ('powershell -NoProfile -Command "Get-Date -Format ''yyyyMMdd_HHmmss''" 2^>nul') do if not "%%T"=="" set RUN_TS=%%T
-for /f %%t in ('powershell -NoProfile -Command "[int64](Get-Date).Ticks"') do set OVERALL_START=%%t
-echo Output: %CD%\outputs\%RUN_TS%
-set CASE_NUM=0
+powershell -NoProfile -Command "Get-Date -Format 'yyyyMMdd_HHmmss'" > _tmp_ts.txt
+set /p RUN_TS=<_tmp_ts.txt
+del _tmp_ts.txt
 
-:: Count matching cases (scenery=nature, indoor=kitchen)
-set TOTAL_CASES=0
-for /d %%D in (%EXAMPLE_DIR%\*) do (
-    set _MATCH=0
-    if /i "%%~nxD"=="nature" set _MATCH=1
-    if /i "%%~nxD"=="kitchen" set _MATCH=1
-    if "!_MATCH!"=="1" set /a TOTAL_CASES+=1
-)
-echo Found %TOTAL_CASES% cases  output: ./outputs/%RUN_TS%
+powershell -NoProfile -Command "Get-Random -Maximum 2000000000" > _tmp_seed.txt
+set /p BASE_SEED=<_tmp_seed.txt
+del _tmp_seed.txt
 
-goto :main
+echo Output:    %CD%\outputs\%RUN_TS%
+echo VBench:    %VBENCH_JSON%
+echo Crop:      %VBENCH_CROP%
+echo Base seed: %BASE_SEED%
 
-:: -------------------------------------------------------
-:: Subroutine: reads RC_DIR, RC_NAME, RC_CAPTION from env
-:: -------------------------------------------------------
-:run_case
-    set /a CASE_NUM+=1
-    echo.
-    echo === !CASE_NUM!/%TOTAL_CASES%: !RC_NAME! ===
-    echo output: ./outputs/%RUN_TS%/!RC_NAME!
-    echo img:    !RC_DIR!
-    echo prompt: !RC_CAPTION!
-    echo seed:   !SEED!
-    type "!RC_CAPTION!"
-    echo.
-    for /f %%t in ('powershell -NoProfile -Command "[int64](Get-Date).Ticks"') do set CASE_START=%%t
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" ^
+    -RunTs "%RUN_TS%" ^
+    -BaseSeed %BASE_SEED% ^
+    -VbenchJson "%VBENCH_JSON%" ^
+    -VbenchCrop "%VBENCH_CROP%" ^
+    -WorkDir "%CD%"
 
-    python fastvideo/sample/sample_5b.py ^
-        --seed !SEED! ^
-        --gradient_checkpointing ^
-        --train_batch_size=1 ^
-        --max_sample_steps=1 ^
-        --mixed_precision="bf16" ^
-        --allow_tf32 ^
-        --t5_cpu ^
-        --video_output_dir="./outputs/%RUN_TS%/!RC_NAME!" ^
-        --jpg_dir="!RC_DIR!" ^
-        --caption_path="!RC_CAPTION!" ^
-        --test_data_dir="./val" ^
-        --num_euler_timesteps 5 ^
-        --rand_num_img 0.6 ^
-        --internvl_path "./InternVL3-2B-Instruct" ^
-        --height 720 ^
-        --width 960 ^
-        --num_frames 161 ^
-        --fps 24
-
-    powershell -NoProfile -Command "$e=([int64](Get-Date).Ticks-!CASE_START!)/1e7; $tot=([int64](Get-Date).Ticks-%OVERALL_START%)/1e7; $fps=[math]::Round(163/$e,2); $rem=(%TOTAL_CASES%-!CASE_NUM!)*($tot/!CASE_NUM!); Write-Host ('  time='+[math]::Round($e,1)+'s  fps='+$fps+'  ETA='+[math]::Round($rem,0)+'s')"
-    exit /b 0
-
-:main
-
-for /d %%D in (%EXAMPLE_DIR%\*) do (
-    set _MATCH=0
-    if /i "%%~nxD"=="nature" set _MATCH=1
-    if /i "%%~nxD"=="kitchen" set _MATCH=1
-    if "!_MATCH!"=="1" (
-        set RC_NAME=%%~nxD
-        set RC_DIR=%%D
-        set /a SEED=%RANDOM% * 32768 + %RANDOM%
-        echo A %%~nxD scene. > temp_caption_%%~nxD.txt
-        set RC_CAPTION=temp_caption_%%~nxD.txt
-        if exist "%%D\prompt.txt" set RC_CAPTION=%%D\prompt.txt
-        if exist "%%D\prompt.json" (
-            powershell -NoProfile -Command "(Get-Content '%%D\prompt.json' -Raw | ConvertFrom-Json).prompt | Set-Content 'temp_prompt_%%~nxD.txt' -Encoding UTF8"
-            set RC_CAPTION=temp_prompt_%%~nxD.txt
-        )
-        call :run_case
-    )
-)
-
-echo.
-powershell -NoProfile -Command "$e=([int64](Get-Date).Ticks-%OVERALL_START%)/1e7; Write-Host ('Total: %TOTAL_CASES% cases in '+[math]::Round($e,1)+'s  avg='+[math]::Round($e/%TOTAL_CASES%,1)+'s/case')"
-
-del temp_caption_*.txt 2>nul
-del temp_prompt_*.txt 2>nul
-exit /b 0
+exit /b %ERRORLEVEL%
