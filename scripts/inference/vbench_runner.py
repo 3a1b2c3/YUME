@@ -18,7 +18,7 @@ from pathlib import Path
 
 ALLOWED_TYPES = ['indoor', 'scenery']
 NUM_SAMPLES   = 5
-NUM_FRAMES    = 29   # default: latent_frame_zero=8, VAE stride 4 → (8-1)*4+1=29
+NUM_FRAMES    = 161
 
 
 # ---------- helpers ----------
@@ -114,15 +114,20 @@ def main():
             done += NUM_SAMPLES
             continue
 
-        safe_cap = _safe(p['caption'])
+        safe_cap   = _safe(p['caption'])
+        safe_cap_u = safe_cap.replace(' ', '_')   # sample_5b replaces spaces → underscores
+
+        def _cap_match(name):
+            return safe_cap in name or safe_cap_u in name
 
         # samples already completed (renamed with _s{i}_seed{n} suffix)
-        already = sorted(out_base.glob(f'*{safe_cap}*_s[0-9]*_seed*.mp4'))
+        already = sorted([f for f in out_base.glob('*.mp4')
+                          if _cap_match(f.name) and '_seed' in f.name])
         n_already = len(already)
 
         # orphans: files from an interrupted run that were never renamed
-        orphans = sorted([f for f in out_base.glob(f'*{safe_cap}*.mp4')
-                          if '_seed' not in f.name])
+        orphans = sorted([f for f in out_base.glob('*.mp4')
+                          if _cap_match(f.name) and '_seed' not in f.name])
 
         # recover orphans with new random seeds
         for i, src in enumerate(orphans):
@@ -226,7 +231,7 @@ def main():
                 all_now  = set(out_base.glob('*.mp4'))
                 raw_mp4s = sorted(
                     [f for f in (all_now - pre_existing)
-                     if safe_cap in f.name and '_seed' not in f.name],
+                     if _cap_match(f.name) and '_seed' not in f.name],
                     key=lambda f: f.name
                 )
                 print(f'  [detect] {len(raw_mp4s)} new mp4s (pre={len(pre_existing)}, now={len(all_now)})')

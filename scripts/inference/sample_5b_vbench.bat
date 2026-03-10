@@ -9,7 +9,7 @@ cd /d "%~dp0..\.."
 ::   sample_5b_vbench.bat [VBENCH_JSON] [VBENCH_CROP] [NUM_FRAMES]
 if not "%~1"=="" (set VBENCH_JSON=%~1) else (set VBENCH_JSON=%CD%\..\VBench\vbench2_beta_i2v\vbench2_beta_i2v\data\i2v-bench-info.json)
 if not "%~2"=="" (set VBENCH_CROP=%~2) else (set VBENCH_CROP=%CD%\..\VBench\vbench2_beta_i2v\vbench2_beta_i2v\data\crop\1-1)
-if not "%~3"=="" (set NUM_FRAMES=%~3) else (set NUM_FRAMES=29)
+if not "%~3"=="" (set NUM_FRAMES=%~3) else (set NUM_FRAMES=161)
 
 echo Output:    %CD%\outputs\vbench
 echo VBench:    %VBENCH_JSON%
