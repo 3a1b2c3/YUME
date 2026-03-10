@@ -154,12 +154,8 @@ class Yume:
             torch.zeros(1, 1, self.model.dim, device=self.model.device)
         )
 
-        # Load config only — weights are loaded below via load_file, so
-        # from_pretrained's weight loading (which reads the full file into RAM) is skipped.
-        with open(os.path.join(checkpoint_dir, "config.json")) as _f:
-            _cfg = json.load(_f)
-        self.model = WanModel.from_config(_cfg)
-        state_dict = load_file(checkpoint_dir+"/diffusion_pytorch_model.safetensors")
+        # Use load_file (mmap, low RAM) instead of from_pretrained (reads full file into RAM).
+        state_dict = load_file(checkpoint_dir + "/diffusion_pytorch_model.safetensors")
         self.model.load_state_dict(state_dict)
 
 
