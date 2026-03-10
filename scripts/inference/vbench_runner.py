@@ -189,11 +189,15 @@ def main():
             try:
                 pre_existing = set(out_base.glob('*.mp4'))
 
+                import socket as _socket
+                with _socket.socket() as _s:
+                    _s.bind(('127.0.0.1', 0))
+                    _free_port = str(_s.getsockname()[1])
                 env = {**os.environ,
                        'TOKENIZERS_PARALLELISM': 'false',
                        'TF_ENABLE_ONEDNN_OPTS':  '0',
                        'LOCAL_RANK': '0', 'RANK': '0', 'WORLD_SIZE': '1',
-                       'MASTER_ADDR': '127.0.0.1', 'MASTER_PORT': '29500'}
+                       'MASTER_ADDR': '127.0.0.1', 'MASTER_PORT': _free_port}
                 subprocess.run([
                     sys.executable, 'fastvideo/sample/sample_5b.py',
                     '--seed', str(seed),
@@ -210,8 +214,8 @@ def main():
                     '--num_euler_timesteps', '5',
                     '--rand_num_img', '0.6',
                     '--internvl_path', './InternVL3-2B-Instruct',
-                    '--height', '720',
-                    '--width', '960',
+                    '--height', '704',
+                    '--width', '1216',
                     '--num_frames', str(args.num_frames),
                     '--fps', '24',
                 ], cwd=str(work_dir), env=env)
