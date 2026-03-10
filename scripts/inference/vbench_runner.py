@@ -198,7 +198,9 @@ def main():
                 with _socket.socket() as _s:
                     _s.bind(('127.0.0.1', 0))
                     _free_port = str(_s.getsockname()[1])
+                _pythonpath = str(work_dir) + os.pathsep + os.environ.get('PYTHONPATH', '')
                 env = {**os.environ,
+                       'PYTHONPATH':             _pythonpath,
                        'TOKENIZERS_PARALLELISM': 'false',
                        'TF_ENABLE_ONEDNN_OPTS':  '0',
                        'LOCAL_RANK': '0', 'RANK': '0', 'WORLD_SIZE': '1',
