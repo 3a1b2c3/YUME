@@ -18,7 +18,7 @@ from pathlib import Path
 
 ALLOWED_TYPES = ['indoor', 'scenery']
 NUM_SAMPLES   = 5
-NUM_FRAMES    = 161
+NUM_FRAMES    = 29   # default: latent_frame_zero=8, VAE stride 4 → (8-1)*4+1=29
 
 
 # ---------- helpers ----------
@@ -60,6 +60,7 @@ def main():
     ap.add_argument('--vbench-json', required=True)
     ap.add_argument('--vbench-crop', required=True)
     ap.add_argument('--work-dir',    required=True)
+    ap.add_argument('--num-frames',  type=int, default=NUM_FRAMES)
     args = ap.parse_args()
 
     work_dir   = Path(args.work_dir)
@@ -211,12 +212,12 @@ def main():
                     '--internvl_path', './InternVL3-2B-Instruct',
                     '--height', '720',
                     '--width', '960',
-                    '--num_frames', str(NUM_FRAMES),
+                    '--num_frames', str(args.num_frames),
                     '--fps', '24',
                 ], cwd=str(work_dir), env=env)
 
                 dur = round(time.time() - t0, 2)
-                fps = round(NUM_FRAMES / dur, 2)
+                fps = round(args.num_frames / dur, 2)
 
                 all_now  = set(out_base.glob('*.mp4'))
                 raw_mp4s = sorted(
