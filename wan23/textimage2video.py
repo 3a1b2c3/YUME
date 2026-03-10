@@ -157,7 +157,7 @@ class Yume:
         # Use load_file (mmap, low RAM) instead of from_pretrained (reads full file into RAM).
         # strict=False: sideblock/mask_token/patch_embedding_* are YUME-only additions not
         # present in the base checkpoint; they stay freshly initialized (same as original flow).
-        state_dict = load_file(os.path.join(checkpoint_dir, "diffusion_pytorch_model.safetensors"))
+        state_dict = load_file(os.path.join(checkpoint_dir, "diffusion_pytorch_model.safetensors"), device=str(self.device))
         self.model.load_state_dict(state_dict, strict=False)
 
 
