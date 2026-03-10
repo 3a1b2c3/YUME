@@ -1,5 +1,6 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import gc
+import json
 import logging
 import math
 import os
@@ -153,7 +154,11 @@ class Yume:
             torch.zeros(1, 1, self.model.dim, device=self.model.device)
         )
 
-        self.model = WanModel.from_pretrained(checkpoint_dir)
+        # Load config only — weights are loaded below via load_file, so
+        # from_pretrained's weight loading (which reads the full file into RAM) is skipped.
+        with open(os.path.join(checkpoint_dir, "config.json")) as _f:
+            _cfg = json.load(_f)
+        self.model = WanModel.from_config(_cfg)
         state_dict = load_file(checkpoint_dir+"/diffusion_pytorch_model.safetensors")
         self.model.load_state_dict(state_dict)
 
