@@ -209,8 +209,8 @@ def main():
                     '--num_euler_timesteps', '5',
                     '--rand_num_img', '0.6',
                     '--internvl_path', './InternVL3-2B-Instruct',
-                    '--height', '384',
-                    '--width', '512',
+                    '--height', '720',
+                    '--width', '960',
                     '--num_frames', str(NUM_FRAMES),
                     '--fps', '24',
                 ], cwd=str(work_dir), env=env)
