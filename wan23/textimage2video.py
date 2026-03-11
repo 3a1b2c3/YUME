@@ -157,13 +157,12 @@ class Yume:
         # Use load_file (mmap, low RAM) instead of from_pretrained (reads full file into RAM).
         # strict=False: sideblock/mask_token/patch_embedding_* are YUME-only additions not
         # present in the base checkpoint; they stay freshly initialized (same as original flow).
-        # load_file uses mmap which fails on Windows when the paging file is too small.
-        # Reading into bytes first uses regular file I/O, bypassing the mmap requirement.
-        import safetensors.torch as _st
+        # Load directly to the target device to avoid holding two copies in RAM.
+        # load_file with device= loads each tensor directly to CUDA, skipping the
+        # intermediate CPU buffer that causes OOM on machines with limited RAM.
+        from safetensors.torch import load_file as _load_file
         _ckpt = os.path.join(checkpoint_dir, "diffusion_pytorch_model.safetensors")
-        with open(_ckpt, "rb") as _f:
-            state_dict = _st.load(_f.read())
-        state_dict = {k: v.to(self.device) for k, v in state_dict.items()}
+        state_dict = _load_file(_ckpt, device=str(self.device))
         self.model.load_state_dict(state_dict, strict=False)
 
 
