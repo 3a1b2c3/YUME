@@ -1311,7 +1311,7 @@ def main(args):
     _local = os.path.abspath(args.internvl_path)
     path = _local if os.path.isdir(_local) else "OpenGVLab/InternVL3-2B-Instruct"
     main_print(f"[INIT] Loading InternVL caption model from {path} ...")
-    torch.set_default_device(None)  # FSDP may leave default device as 'meta'; reset before loading InternVL
+    torch.set_default_device("cpu")  # FSDP may leave default device as 'meta'; reset before loading InternVL
     camption_model = AutoModel.from_pretrained(
         path,
         torch_dtype=torch.bfloat16,
