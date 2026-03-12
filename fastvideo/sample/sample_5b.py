@@ -1311,13 +1311,17 @@ def main(args):
     _local = os.path.abspath(args.internvl_path)
     path = _local if os.path.isdir(_local) else "OpenGVLab/InternVL3-2B-Instruct"
     main_print(f"[INIT] Loading InternVL caption model from {path} ...")
-    torch.set_default_device("cpu")  # FSDP may leave default device as 'meta'; reset before loading InternVL
-    camption_model = AutoModel.from_pretrained(
-        path,
-        torch_dtype=torch.bfloat16,
-        low_cpu_mem_usage=False,
-        use_flash_attn=False,
-        trust_remote_code=True).eval().to(device)
+    # FSDP may leave an active DeviceContext("meta") TorchFunctionMode on the stack.
+    # torch.set_default_device("cpu") only sets a C++ variable and is overridden by
+    # the higher-priority Python TorchFunctionMode.  Pushing a DeviceContext("cpu")
+    # via the context manager sits on top of any lingering meta context and wins.
+    with torch.device("cpu"):
+        camption_model = AutoModel.from_pretrained(
+            path,
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=False,
+            use_flash_attn=False,
+            trust_remote_code=True).eval().to(device)
     tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True, use_fast=False)
     main_print("[INIT] InternVL caption model loaded")
 
