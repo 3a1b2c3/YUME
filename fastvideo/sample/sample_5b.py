@@ -1315,7 +1315,8 @@ def main(args):
     camption_model = AutoModel.from_pretrained(
         path,
         torch_dtype=torch.bfloat16,
-        use_flash_attn=True,
+        low_cpu_mem_usage=False,
+        use_flash_attn=False,
         trust_remote_code=True).eval().to(device)
     tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True, use_fast=False)
     main_print("[INIT] InternVL caption model loaded")
