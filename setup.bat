@@ -34,7 +34,12 @@ if not exist "%TORCH_HOME%" md "%TORCH_HOME%"
 set "PY_URL=https://www.python.org/ftp/python/3.12.6/python-3.12.6-embed-amd64.zip"
 set "PY_ZIP=%CACHE%\python-3.12.6-embed-amd64.zip"
 set "GETPIP=%CACHE%\get-pip.py"
+:: Triton on Windows: woct0rdho/triton-windows ships pre-built wheels via the
+:: triton-windows PyPI package (provides the `triton` import). Prefer that over
+:: a local wheel; if a local wheel is dropped into the project root it still
+:: takes precedence as an offline fallback.
 set "TRITON_WHL=%ROOT%triton-3.0.0-cp312-cp312-win_amd64.whl"
+set "TRITON_PIP_SPEC=triton-windows<3.1"
 set "REQ_IN=%ROOT%requirements-extra.txt"
 set "REQ_WIN=%ROOT%requirements-extra.win.txt"
 
@@ -94,13 +99,14 @@ python -m pip install --extra-index-url https://download.pytorch.org/whl/cu121 t
 echo -- build tools
 python -m pip install packaging ninja --cache-dir "%PIP_CACHE_DIR%" || (echo [ERROR] packaging/ninja failed & pause & exit /b 1)
 
-echo -- install local Triton wheel (Windows cp312)
-if not exist "%TRITON_WHL%" (
-  echo [ERROR] missing local wheel: "%TRITON_WHL%"
-  echo Put triton-3.0.0-cp312-cp312-win_amd64.whl into project root and re-run.
-  pause & exit /b 1
+echo -- install Triton (Windows)
+if exist "%TRITON_WHL%" (
+  echo -- using local wheel "%TRITON_WHL%"
+  python -m pip install "%TRITON_WHL%" --no-deps --cache-dir "%PIP_CACHE_DIR%" || (echo [ERROR] local Triton install failed & pause & exit /b 1)
+) else (
+  echo -- no local wheel found, installing %TRITON_PIP_SPEC% from PyPI (woct0rdho/triton-windows)
+  python -m pip install -U "%TRITON_PIP_SPEC%" --cache-dir "%PIP_CACHE_DIR%" || (echo [ERROR] triton-windows install failed -- drop triton-3.0.0-cp312-cp312-win_amd64.whl in project root and re-run & pause & exit /b 1)
 )
-python -m pip install "%TRITON_WHL%" --no-deps --cache-dir "%PIP_CACHE_DIR%" || (echo [ERROR] local Triton install failed & pause & exit /b 1)
 
 echo -- optional flash-attn (may fail on Windows, ignore)
 python -m pip install flash-attn==2.7.0.post2 --no-build-isolation --cache-dir "%PIP_CACHE_DIR%"
