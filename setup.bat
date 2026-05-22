@@ -39,7 +39,10 @@ set "GETPIP=%CACHE%\get-pip.py"
 :: a local wheel; if a local wheel is dropped into the project root it still
 :: takes precedence as an offline fallback.
 set "TRITON_WHL=%ROOT%triton-3.0.0-cp312-cp312-win_amd64.whl"
-set "TRITON_PIP_SPEC=triton-windows<3.1"
+:: Triton 3.1.x is the line paired with torch 2.5 upstream; the woct0rdho
+:: package starts at 3.1.0 on PyPI (older 3.0.x wheels only exist as local
+:: files on GitHub releases).
+set "TRITON_PIP_SPEC=triton-windows>=3.1,<3.2"
 set "REQ_IN=%ROOT%requirements-extra.txt"
 set "REQ_WIN=%ROOT%requirements-extra.win.txt"
 
